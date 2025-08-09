@@ -1,0 +1,36 @@
+{
+  "name": "credit-finance-analyzer-electron",
+  "version": "1.0.0",
+  "description": "银行授信财务分析助手 - Windows 打包版（Electron）",
+  "main": "main.js",
+  "author": "ChatGPT",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.example.cfa",
+    "productName": "银行授信财务分析助手",
+    "directories": { "output": "release" },
+    "files": ["main.js","preload.js","dist/**/*"],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}_${version}_${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "银行授信财务分析助手"
+    }
+  }
+}
