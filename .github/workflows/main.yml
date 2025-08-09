@@ -1,6 +1,8 @@
 name: Build Windows EXE
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
@@ -10,7 +12,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 只指定 node-version；不使用任何缓存相关字段
       - name: Setup Node (no cache)
         uses: actions/setup-node@v4
         with:
@@ -21,7 +22,6 @@ jobs:
           node -v
           npm -v
 
-      # 防呆：若 dist/index.html 不存在则自动补一个占位页
       - name: Ensure dist/index.html exists (auto-fix)
         shell: pwsh
         run: |
@@ -32,21 +32,15 @@ jobs:
 "@ | Set-Content -Encoding UTF8 dist/index.html
           }
 
-      # 安装依赖（不用 npm ci）
       - name: Install deps
         run: npm install --no-audit --no-fund
 
-      # 构建 Windows 安装包与便携版；禁用发布
       - name: Build Windows EXE (x64)
         run: npx electron-builder --win nsis portable --x64 --publish=never
         env:
           ELECTRON_CACHE: ${{ runner.temp }}\electron
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
-          # 如需签名再配置 Secrets：
-          # CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          # CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
 
-      # 上传构建产物
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
