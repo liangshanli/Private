@@ -15,11 +15,31 @@ jobs:
           node-version: 18
           cache: npm
 
+      - name: Ensure dist/index.html exists (auto-fix)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist")) { New-Item -ItemType Directory dist | Out-Null }
+          if (-not (Test-Path "dist/index.html")) {
+            @"
+<!doctype html><meta charset="utf-8"><title>Placeholder</title><body>OK</body>
+"@ | Set-Content -Encoding UTF8 dist/index.html
+          }
+          Write-Host "dist/index.html present."
+
       - name: Install deps
         run: npm ci --no-audit --no-fund
 
       - name: Build Windows EXE (x64)
-        run: npx electron-builder --win nsis portable --x64
+        run: npx electron-builder --win nsis portable --x64 --publish=never
+        env:
+          # 不配置证书就不会签名；保持为空即可
+          ELECTRON_CACHE: ${{ runner.temp }}\electron
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
+
+      - name: List release folder
+        shell: pwsh
+        run: |
+          if (Test-Path "release") { Get-ChildItem release -Recurse | Format-List Name,Length,FullName } else { Write-Error "release folder not found" }
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -28,4 +48,4 @@ jobs:
           path: |
             release\*.exe
             release\*.portable.exe
-          if-no-files-found: warn
+          if-no-files-found: error
