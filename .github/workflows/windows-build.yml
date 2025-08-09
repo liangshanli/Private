@@ -10,19 +10,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node (no cache)
         uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: npm
 
-      - name: Show Node & npm (for debugging)
+      - name: Show Node & npm
         run: |
           node -v
           npm -v
 
-      # 防呆：确保有 dist/index.html（你仓库里已有的话，这步会跳过）
-      - name: Ensure dist/index.html exists
+      - name: Ensure dist/index.html exists (auto-fix)
         shell: pwsh
         run: |
           if (-not (Test-Path "dist")) { New-Item -ItemType Directory dist | Out-Null }
@@ -31,30 +29,20 @@ jobs:
 <!doctype html><meta charset="utf-8"><title>Placeholder</title><body>OK</body>
 "@ | Set-Content -Encoding UTF8 dist/index.html
           }
-          Write-Host "dist/index.html present."
 
-      # 关键区别：用 npm install，而不是 npm ci（你的仓库没有 package-lock.json）
       - name: Install deps
         run: npm install --no-audit --no-fund
 
       - name: Build Windows EXE (x64)
         run: npx electron-builder --win nsis portable --x64 --publish=never
         env:
-          # 用临时目录作缓存，避免路径权限问题
           ELECTRON_CACHE: ${{ runner.temp }}\electron
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder
-          # 如果以后要签名，再在仓库 Secrets 里配置这两项
-          # CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          # CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
 
       - name: List release folder
         shell: pwsh
         run: |
-          if (Test-Path "release") {
-            Get-ChildItem release -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
-          } else {
-            Write-Error "release folder not found"
-          }
+          if (Test-Path "release") { Get-ChildItem release -Recurse | Select-Object FullName,Length | Format-Table -AutoSize } else { Write-Error "release folder not found" }
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
