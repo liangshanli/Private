@@ -1,0 +1,146 @@
+<!doctype html><html lang="zh-CN"><head>
+<meta charset="UTF-8" /><meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>银行授信财务分析助手（Windows 版）</title>
+<link rel="stylesheet" href="https://unpkg.com/tailwindcss@2.2.19/dist/tailwind.min.css">
+</head><body class="bg-gray-50"><div id="root"></div>
+
+<!-- 运行时依赖（用 CDN，首次需要联网；如需离线以后我再给你本地版） -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
+<script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/docx@8.1.0/build/index.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+  const { useState, useMemo, useRef } = React;
+  const { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } = Recharts;
+  const PERIODS = ["2022","2023","2024","2025-03"];
+  const nf=(v,d=2)=> (v==null||isNaN(+v))?"—":(+v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+  const pct=(v,d=2)=> (v==null||isNaN(+v))?"—":(+v*100).toFixed(d)+"%";
+  const toNum=v=>{ if(v==null||v==="")return NaN; const n=Number(String(v).replace(/[\s,]/g,'')); return isNaN(n)?NaN:n; };
+
+  function App(){
+    const [tab,setTab]=useState("data");
+    const [bs,setBs]=useState(defaultBS());
+    const [is,setIs]=useState(defaultIS());
+    const [cf,setCf]=useState(defaultCF());
+    const summary=useMemo(()=>buildSummary(bs,is,cf),[bs,is,cf]);
+    const turnover=useMemo(()=>buildTurnover(summary),[summary]);
+    const chart1=useRef(null),chart2=useRef(null),chart3=useRef(null);
+    const reportText=useMemo(()=>generateText(summary,turnover),[summary,turnover]);
+
+    const onExcel=async(file)=>{
+      const buf=await file.arrayBuffer(); const wb=XLSX.read(buf);
+      const mapSheet=(keys)=>{
+        for(const n of wb.SheetNames){ const low=n.toLowerCase(); if(keys.some(k=>low.includes(k))) return XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1}); }
+        for(const n of wb.SheetNames){ const rows=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1}); const joined=(rows.slice(0,10).flat()||[]).map(x=>String(x||'').toLowerCase()).join('|'); if(keys.some(k=>joined.includes(k))) return rows; }
+        return null;
+      };
+      const bsRows=mapSheet(["资产负债","balance"]), isRows=mapSheet(["利润","损益","income"]), cfRows=mapSheet(["现金流","cash"]);
+      if(bsRows) setBs(parseSheet(bsRows)); if(isRows) setIs(parseSheet(isRows)); if(cfRows) setCf(parseSheet(cfRows));
+      alert("Excel 导入完成。");
+    };
+
+    const exportWord=async()=>{
+      const { Document,Packer,Paragraph,HeadingLevel,Table,TableRow,TableCell,ImageRun }=docx;
+      const doc=new Document({sections:[{children:[
+        new Paragraph({text:"银行授信财务分析报告（自动生成）",heading:HeadingLevel.TITLE}),
+        new Paragraph({text:"生成时间："+new Date().toLocaleString()}),
+        new Paragraph({text:"一、财务概览",heading:HeadingLevel.HEADING_1}),
+        tableFromSummary(summary),
+        new Paragraph({text:"二、资产/负债/权益趋势",heading:HeadingLevel.HEADING_1}), ...(await chartParas(chart1)),
+        new Paragraph({text:"三、收入与净利润趋势",heading:HeadingLevel.HEADING_1}), ...(await chartParas(chart2)),
+        new Paragraph({text:"四、经营现金流趋势",heading:HeadingLevel.HEADING_1}), ...(await chartParas(chart3)),
+        new Paragraph({text:"五、文字化分析（模板自动填充）",heading:HeadingLevel.HEADING_1}),
+        ...reportText.split("\n").map(line=>new Paragraph({text:line})),
+      ]}]});
+      const blob=await Packer.toBlob(doc); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download="银行授信财务分析报告_"+Date.now()+".docx"; a.click();
+    };
+
+    return (<div className="max-w-6xl mx-auto p-4">
+      <div className="bg-white rounded-xl border shadow-sm p-2 flex gap-2 mb-4">
+        {["data","analysis","report"].map(k=><button key={k} className={"px-3 py-1.5 rounded-lg "+(tab===k?"bg-gray-900 text-white":"bg-white border")} onClick={()=>setTab(k)}>{{data:"数据录入",analysis:"图表分析",report:"报告生成"}[k]}</button>)}
+      </div>
+
+      {tab==="data" && <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="text-base font-semibold">三大报表</div>
+          <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+            <span className="px-3 py-2 border rounded-xl">导入 Excel (.xlsx)</span>
+            <input type="file" accept=".xlsx" className="hidden" onChange={e=> e.target.files && onExcel(e.target.files[0])}/>
+          </label>
+        </div>
+        <StatementEditor title="资产负债表" items={bs} setItems={setBs}/>
+        <StatementEditor title="利润表" items={is} setItems={setIs}/>
+        <StatementEditor title="现金流量表" items={cf} setItems={setCf}/>
+      </div>}
+
+      {tab==="analysis" && <div className="grid gap-4">
+        <div className="bg-white rounded-xl border shadow-sm p-4"><div className="text-base font-semibold mb-2">摘要指标</div><SummaryTable summary={summary}/></div>
+        <div className="bg-white rounded-xl border shadow_sm p-4" ref={chart1}><div className="text-base font-semibold mb-2">资产 / 负债 / 权益趋势</div><div className="h-72">
+          <ResponsiveContainer width="100%" height="100%"><LineChart data={summary}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="期间"/><YAxis/><Tooltip/><Legend/>
+          <Line type="monotone" dataKey="资产总额" name="资产总额" dot/><Line type="monotone" dataKey="负债总额" name="负债总额" dot/><Line type="monotone" dataKey="所有者权益" name="所有者权益" dot/></LineChart></ResponsiveContainer>
+        </div></div>
+        <div className="bg-white rounded-xl border shadow-sm p-4" ref={chart2}><div className="text-base font-semibold mb-2">收入与净利润趋势</div><div className="h-72">
+          <ResponsiveContainer width="100%" height="100%"><BarChart data={summary}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="期间"/><YAxis/><Tooltip/><Legend/>
+          <Bar dataKey="营业收入" name="营业收入"/><Bar dataKey="净利润" name="净利润"/></BarChart></ResponsiveContainer>
+        </div></div>
+        <div className="bg白 rounded-xl border shadow-sm p-4" ref={chart3}><div className="text-base font-semibold mb-2">经营活动现金流趋势</div><div className="h-72">
+          <ResponsiveContainer width="100%" height="100%"><LineChart data={summary}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="期间"/><YAxis/><Tooltip/><Legend/><Line type="monotone" dataKey="经营现金流" name="经营现金流" dot/></LineChart></ResponsiveContainer>
+        </div></div>
+        <div className="bg-white rounded-xl border shadow-sm p-4"><div className="text-base font-semibold mb-2">营运能力（周转率）</div><TurnoverTable data={turnover}/></div>
+      </div>}
+
+      {tab==="report" && <div className="bg-white rounded-xl border shadow-sm p-4 space-y-3">
+        <div className="flex items-center justify-between"><div><div className="text-base font-semibold">自动生成文字分析（模板填充）</div><p className="text-sm text-gray-500">可直接粘贴到授信报告；支持导出 Word。</p></div><button className="px-3 py-2 rounded-xl border" onClick={exportWord}>导出 Word</button></div>
+        <textarea className="w-full h-96 p-3 border rounded-md font-mono text-sm" readOnly value={reportText}></textarea>
+      </div>}
+    </div>); }
+
+  function StatementEditor({ title, items, setItems }){
+    const addRow=()=>setItems([...items,{name:"新增科目",values:{"2022":NaN,"2023":NaN,"2024":NaN,"2025-03":NaN}}]);
+    const updateCell=(idx,p,val)=>{ const next=[...items]; next[idx]={...next[idx],values:{...next[idx].values,[p]:toNum(val)}}; setItems(next); };
+    const updateName=(idx,name)=>{ const next=[...items]; next[idx]={...next[idx],name}; setItems(next); };
+    const del=(idx)=>setItems(items.filter((_,i)=>i!==idx));
+    return (<div className="border rounded-xl p-3">
+      <div className="flex items-center justify-between mb-2"><div className="font-semibold">{title}</div><button className="px-3 py-1.5 rounded-lg border" onClick={addRow}>新增科目</button></div>
+      <div className="overflow-auto"><table className="min-w-full text-sm"><thead><tr className="bg-gray-100">
+        <th className="p-2 text-left w-64">科目</th>{PERIODS.map(p=><th key={p} className="p-2 text-right">{p}</th>)}<th className="p-2"></th>
+      </tr></thead><tbody>
+        {items.map((row,idx)=>(<tr key={idx} className="border-t">
+          <td className="p-2"><input className="border rounded-xl px-2 py-2 text-sm w-full" value={row.name} onChange={e=>updateName(idx,e.target.value)}/></td>
+          {PERIODS.map(pr=>(<td key={pr} className="p-1"><input className="border rounded-xl px-2 py-2 text-sm w-full text-right" defaultValue={isNaN(row.values[pr])?"":String(row.values[pr])} onBlur={e=>updateCell(idx,pr,e.target.value)}/></td>))}
+          <td className="p-2 text-right"><button onClick={()=>del(idx)} className="px-3 py-1 rounded-lg border text-red-600">删除</button></td>
+        </tr>))}
+      </tbody></table></div></div>);
+  }
+
+  function SummaryTable({ summary }){ const head=["期间","资产总额","负债总额","所有者权益","流动资产","流动负债","货币资金","应收账款","存货","营业收入","净利润","经营现金流","流动比率","速动比率","资产负债率"];
+    return (<div className="overflow-auto"><table className="min-w-full text-sm"><thead><tr className="bg-gray-100">{head.map(h=><th key={h} className="p-2 text-left whitespace-nowrap">{h}</th>)}</tr></thead><tbody>
+      {summary.map((r,i)=>(<tr key={i} className="border-t">
+        <td className="p-2">{r.期间}</td><td className="p-2">{nf(r.资产总额)}</td><td className="p-2">{nf(r.负债总额)}</td>
+        <td className="p-2">{nf(r.所有者权益)}</td><td className="p-2">{nf(r.流动资产)}</td><td className="p-2">{nf(r.流动负债)}</td>
+        <td className="p-2">{nf(r.货币资金)}</td><td className="p-2">{nf(r.应收账款)}</td><td className="p-2">{nf(r.存货)}</td>
+        <td className="p-2">{nf(r.营业收入)}</td><td className="p-2">{nf(r.净利润)}</td><td className="p-2">{nf(r.经营现金流)}</td>
+        <td className="p-2">{isNaN(r.流动比率)?"—":r.流动比率.toFixed(2)}</td><td className="p-2">{isNaN(r.速动比率)?"—":r.速动比率.toFixed(2)}</td>
+        <td className="p-2">{isNaN(r.资产负债率)?"—":(r.资产负债率*100).toFixed(2)+"%"}</td>
+      </tr>))}
+    </tbody></table></div>);
+  }
+
+  function defaultBS(){ const s=[["资产总额",15173.17,18162.50,29147.62,46802.02],["货币资金",801.69,1203.52,1781.78,2929.15],["应收票据",2263.34,2445.47,3190.93,1887.51],["应收账款",3361.70,3818.49,3909.44,5326.58],["其他应收款",1173.58,137.25,708.97,116.00],["预付款项",141.97,52.14,84.46,4347.98],["合同资产",464.47,1745.48,7771.12,14185.04],["存货",255.57,540.00,626.78,633.27],["其他流动资产",136.54,70.03,161.89,31.84],["流动资产合计",8955.72,10360.39,18651.98,29714.99],["固定资产",6125.89,5175.09,7548.51,10341.61],["在建工程",0,117.35,1709.39,4431.76],["使用权资产",0,657.52,477.68,375.32],["递延所得税资产",91.56,138.59,104.94,104.94],["非流动资产合计",6217.45,7802.11,10495.64,17087.03],["负债总额",11884.08,15428.72,19735.25,34681.70],["流动负债合计",11736.32,14172.23,18757.99,21564.96],["股东权益合计",3289.09,2733.78,9412.36,12120.32]]; return s.map(([n,a,b,c,d])=>({name:n,values:{"2022":a,"2023":b,"2024":c,"2025-03":d}})); }
+  function defaultIS(){ const s=[["营业收入",8121.75,12916.10,15862.43,5074.68],["营业成本",6016.82,10549.66,12460.70,4120.62],["净利润",2076.67,2309.71,3022.94,913.22]]; return s.map(([n,a,b,c,d])=>({name:n,values:{"2022":a,"2023":b,"2024":c,"2025-03":d}})); }
+  function defaultCF(){ const s=[["经营活动现金流量净额",2014.92,999.01,471.31,-1703.46],["投资活动现金流量净额",-1660.14,-718.62,-3048.09,-7261.32],["筹资活动现金流量净额",151.58,235.20,3420.22,10112.14]]; return s.map(([n,a,b,c,d])=>({name:n,values:{"2022":a,"2023":b,"2024":c,"2025-03":d}})); }
+  function getVal(items,key,p){ const row=items.find(r=>r.name.includes(key)); return row?toNum(row.values[p]):NaN; }
+  function buildSummary(bs,is,cf){ return PERIODS.map(p=>{ const 资产总额=getVal(bs,"资产总额",p),负债总额=getVal(bs,"负债总额",p),所有者权益=getVal(bs,"股东权益合计",p)||getVal(bs,"所有者权益",p),流动资产=getVal(bs,"流动资产合计",p),流动负债=getVal(bs,"流动负债合计",p),货币资金=getVal(bs,"货币资金",p),应收账款=getVal(bs,"应收账款",p),存货=getVal(bs,"存货",p),预付款项=getVal(bs,"预付款项",p),合同资产=getVal(bs,"合同资产",p),营业收入=getVal(is,"营业收入",p),净利润=getVal(is,"净利润",p),经营现金流=getVal(cf,"经营活动现金流量净额",p); const 速动资产=流动资产-(isNaN(存货)?0:存货)-(isNaN(预付款项)?0:预付款项)-(isNaN(合同资产)?0:合同资产); return {期间:p,资产总额,负债总额,所有者权益,流动资产,流动负债,货币资金,应收账款,存货,营业收入,净利润,经营现金流,流动比率:流动负债?流动资产/流动负债:NaN,速动比率:流动负债?速动资产/流动负债:NaN,资产负债率:资产总额?负债总额/资产总额:NaN}; }); }
+  function buildTurnover(summary){ const rows=[]; const avg=(a,b,k)=>{const x=+a[k],y=+b[k]; return (isNaN(x)||isNaN(y))?NaN:(x+y)/2;}; for(let i=1;i<summary.length;i++){ const prev=summary[i-1],cur=summary[i]; const rev=+cur.营业收入, cogs=Math.max(0, +cur.营业收入-+cur.净利润); rows.push({期间:cur.期间,应收账款周转率:isNaN(avg(prev,cur,"应收账款"))||!rev?NaN:rev/avg(prev,cur,"应收账款"),存货周转率:isNaN(avg(prev,cur,"存货"))||!cogs?NaN:cogs/avg(prev,cur,"存货"),总资产周转率:isNaN(avg(prev,cur,"资产总额"))||!rev?NaN:rev/avg(prev,cur,"资产总额")}); } return rows; }
+  function tableFromSummary(rows){ const {Table,TableRow,TableCell,Paragraph}=docx; const h=["期间","资产总额","负债总额","所有者权益","流动资产","流动负债","营业收入","净利润","经营现金流","流动比率","速动比率","资产负债率"]; return new Table({rows:[ new TableRow({children:h.map(x=>new TableCell({children:[new Paragraph(String(x))]}))}), ...rows.map(r=> new TableRow({children:[ new TableCell({children:[new Paragraph(r.期间)]}), new TableCell({children:[new Paragraph(nf(r.资产总额))]}), new TableCell({children:[new Paragraph(nf(r.负债总额))]}), new TableCell({children:[new Paragraph(nf(r.所有者权益))]}), new TableCell({children:[new Paragraph(nf(r.流动资产))]}), new TableCell({children:[new Paragraph(nf(r.流动负债))]}), new TableCell({children:[new Paragraph(nf(r.营业收入))]}), new TableCell({children:[new Paragraph(nf(r.净利润))]}), new TableCell({children:[new Paragraph(nf(r.经营现金流))]}), new TableCell({children:[new Paragraph(isNaN(r.流动比率)?"—":r.流动比率.toFixed(2))]}), new TableCell({children:[new Paragraph(isNaN(r.速动比率)?"—":r.速动比率.toFixed(2))]}), new TableCell({children:[new Paragraph(isNaN(r.资产负债率)?"—":(r.资产负债率*100).toFixed(2)+"%")]}), ]})) ]}); }
+  async function chartParas(ref){ if(!ref.current) return [new docx.Paragraph({text:""})]; const canvas=await html2canvas(ref.current,{backgroundColor:"#fff",scale:2}); const base64=canvas.toDataURL("image/png").split(",")[1]; const bin=Uint8Array.from(atob(base64),c=>c.charCodeAt(0)); return [ new docx.Paragraph({children:[ new docx.ImageRun({data:bin,transformation:{width:900,height:Math.round(900*0.56)}}) ]}) ]; }
+  function generateText(s){ const g=p=>s.find(x=>x.期间===p),a22=g("2022"),a23=g("2023"),a24=g("2024"),a253=g("2025-03"),trend=(a,b)=>b>a?"上升":b<a?"下降":"持平",asset=trend(a22.资产总额,a24.资产总额),liab=trend(a22.负债总额,a24.负债总额); return ["（一）资产结构分析",`2022年-2024年及2025年3月末，申请人资产总额分别为${nf(a22.资产总额)}万元、${nf(a23.资产总额)}万元、${nf(a24.资产总额)}万元和${nf(a253.资产总额)}万元，资产规模整体呈${asset}趋势。`,`各期流动资产分别为${nf(a22.流动资产)}、${nf(a23.流动资产)}、${nf(a24.流动资产)}、${nf(a253.流动资产)}万元，占资产总额比分别为${pct(a22.流动资产/a22.资产总额)}、${pct(a23.流动资产/a23.资产总额)}、${pct(a24.流动资产/a24.资产总额)}、${pct(a253.流动资产/a253.资产总额)}。`,`非流动资产分别为${nf(a22.资产总额-a22.流动资产)}、${nf(a23.资产总额-a23.流动资产)}、${nf(a24.资产总额-a24.流动资产)}、${nf(a253.资产总额-a253.流动资产)}万元。`,"","（二）负债结构分析",`2022年-2024年及2025年3月末，负债总额分别为${nf(a22.负债总额)}、${nf(a23.负债总额)}、${nf(a24.负债总额)}、${nf(a253.负债总额)}万元，整体呈${liab}。`,`各期流动负债分别为${nf(a22.流动负债)}、${nf(a23.流动负债)}、${nf(a24.流动负债)}、${nf(a253.流动负债)}万元。`,"","（三）所有者权益分析",`各期所有者权益分别为${nf(a22.所有者权益)}、${nf(a23.所有者权益)}、${nf(a24.所有者权益)}、${nf(a253.所有者权益)}万元。`,"","（四）四项能力分析",`流动比率（2022-2025-03）：${[a22,a23,a24,a253].map(x=>isNaN(x.流动比率)?"—":x.流动比率.toFixed(2)).join("/") }，速动比率：${[a22,a23,a24,a253].map(x=>isNaN(x.速动比率)?"—":x.速动比率.toFixed(2)).join("/") }；资产负债率：${[a22,a23,a24,a253].map(x=>isNaN(x.资产负债率)?"—":(x.资产负债率*100).toFixed(2)+"%").join("/") }。`,`营业收入（万元）：${[a22,a23,a24,a253].map(x=> nf(x.营业收入)).join("/") }；净利润（万元）：${[a22,a23,a24,a253].map(x=> nf(x.净利润)).join("/") }。`,"","（五）现金流量分析",`经营活动现金流量净额（万元）：${[a22,a23,a24,a253].map(x=> nf(x.经营现金流)).join("/") }。`,].join("\n"); }
+  function parseSheet(rows){ if(!rows||!rows.length) return []; let h=0; for(let i=0;i<Math.min(6,rows.length);i++){ const line=(rows[i]||[]).map(String).join("|"); if(/2022|2023|2024|2025/.test(line)){h=i;break;} } const header=rows[h]||[]; const data=rows.slice(h+1).filter(r=>r&&r[0]); const idx={name:0}; for(let j=1;j<header.length;j++){ const c=String(header[j]||"").trim(); if(c.startsWith("2022")) idx["2022"]=j; else if(c.startsWith("2023")) idx["2023"]=j; else if(c.startsWith("2024")) idx["2024"]=j; else if(c.startsWith("2025")) idx["2025-03"]=j; } return data.map(r=>({name:String(r[0]).trim(),values:{"2022":toNum(r[idx["2022"]]),"2023":toNum(r[idx["2023"]]),"2024":toNum(r[idx["2024"]]),"2025-03":toNum(r[idx["2025-03"]])}})); }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script></body></html>
