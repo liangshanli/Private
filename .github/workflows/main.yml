@@ -1,8 +1,8 @@
 name: Build Windows EXE
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # 手动运行按钮
   push:
-    branches: [ main ]
+    branches: [ main ]      # 提交到 main 也会触发（备用）
 
 jobs:
   build:
@@ -12,6 +12,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 不使用任何 cache 字段——避免“缺少锁文件”的报错
       - name: Setup Node (no cache)
         uses: actions/setup-node@v4
         with:
@@ -22,6 +23,7 @@ jobs:
           node -v
           npm -v
 
+      # 防呆：缺少 dist/index.html 时自动补一个占位页
       - name: Ensure dist/index.html exists (auto-fix)
         shell: pwsh
         run: |
